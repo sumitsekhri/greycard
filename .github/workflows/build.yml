@@ -1,6 +1,6 @@
 # Builds the menu-bar app on GitHub's macOS machines, so your Mac needs no developer tools.
-# Every push: the DMG is attached to the run (Actions tab → run → Artifacts; arrives zipped).
-# Tag a commit (e.g. v1.0.1): the DMG is published as a plain download on the Releases page.
+# Every push to main publishes a release with Greycard.dmg as a plain download:
+# https://github.com/sumitsekhri/greycard/releases/latest
 name: Build DMG
 
 on:
@@ -39,12 +39,15 @@ jobs:
           name: Greycard-dmg
           path: build/Greycard.dmg
 
-      - name: Attach to release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release (plain DMG download)
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          name: Greycard ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
           files: build/Greycard.dmg
-          name: Greycard ${{ github.ref_name }}
           body: |
             Download **Greycard.dmg** below, open it and drag Greycard onto Applications.
             First launch: macOS will block it once. Click Done, then go to System Settings › Privacy & Security and click **Open Anyway**.

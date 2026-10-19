@@ -26,7 +26,7 @@ This also produces `build/Greycard.dmg`, a normal drag-to-Applications installer
 
 1. Go to the repo's **Releases** page (https://github.com/sumitsekhri/greycard/releases/latest) and download **Greycard.dmg**.
 2. Open the DMG and drag Greycard onto Applications.
-3. Each version is published by pushing a tag such as `v1.0.1`; the workflow in `.github/workflows/build.yml` builds it on GitHub's macOS machines.
+3. Every push to `main` builds a new release automatically on GitHub's macOS machines (`.github/workflows/build.yml`).
 4. On first launch macOS blocks it because it isn't notarized. Click **Done**, then go to **System Settings › Privacy & Security**, scroll down and click **Open Anyway**. This is only needed once.
 
 ## Launch at login
