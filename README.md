@@ -16,7 +16,7 @@ Requires macOS 14 or later. It has four parts:
 
 ```zsh
 xcode-select --install        # one-time and free; skip if already installed
-cd ~/Downloads/Greycard
+git clone https://github.com/sumitsekhri/greycard && cd greycard
 ./build-app.sh --install      # builds, copies to /Applications, launches
 ```
 
@@ -24,9 +24,9 @@ This also produces `build/Greycard.dmg`, a normal drag-to-Applications installer
 
 ## Install: option B, let GitHub build it (no developer tools on your Mac)
 
-1. Push this folder to a GitHub repo. The workflow in `.github/workflows/build.yml` runs on GitHub's macOS machines.
-2. Open the **Actions** tab, then the latest run, and download **Greycard-dmg**.
-3. Open the DMG and drag the app onto Applications.
+1. Go to the repo's **Releases** page (https://github.com/sumitsekhri/greycard/releases/latest) and download **Greycard.dmg**.
+2. Open the DMG and drag Greycard onto Applications.
+3. Each version is published by pushing a tag such as `v1.0.1`; the workflow in `.github/workflows/build.yml` builds it on GitHub's macOS machines.
 4. On first launch macOS blocks it because it isn't notarized. Click **Done**, then go to **System Settings › Privacy & Security**, scroll down and click **Open Anyway**. This is only needed once.
 
 ## Launch at login
