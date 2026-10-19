@@ -182,6 +182,7 @@ struct MenuView: View {
 /// f.lux-style colour-temperature control. Kelvin, not lumens: lower = warmer.
 private struct WarmthSection: View {
     @EnvironmentObject var model: AppModel
+    @State private var showSchedule = false
 
     private struct Stop: Hashable { let name: String; let kelvin: Double }
 
@@ -195,17 +196,23 @@ private struct WarmthSection: View {
             HStack {
                 Image(systemName: "sun.max.fill").foregroundStyle(swatch)
                 Text("Warmth").font(.subheadline.bold())
+                if model.autoActive {
+                    Text("AUTO")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.2)))
+                }
                 Spacer()
-                Text(model.tintEnabled ? "\(Int(model.tintKelvin))K" : "Off")
+                Text(model.effectiveKelvin.map { "\($0)K" } ?? "Off")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                Toggle("", isOn: Binding(get: { model.tintEnabled }, set: { model.setTintEnabled($0) }))
+                Toggle("", isOn: Binding(get: { model.warmthOn }, set: { model.setTintEnabled($0) }))
                     .toggleStyle(.switch)
                     .controlSize(.mini)
                     .labelsHidden()
             }
 
-            Slider(value: Binding(get: { model.tintKelvin }, set: { model.setTintKelvin($0) }),
+            Slider(value: Binding(get: { model.displayKelvin }, set: { model.setTintKelvin($0) }),
                    in: 1900...10000, step: 100) {
                 EmptyView()
             } minimumValueLabel: {
@@ -219,11 +226,19 @@ private struct WarmthSection: View {
                     Button(stop.name) { model.setTintKelvin(stop.kelvin) }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .tint(Int(model.tintKelvin) == Int(stop.kelvin) && model.tintEnabled ? Color.accentColor : nil)
+                        .tint(Int(model.displayKelvin) == Int(stop.kelvin) && model.warmthOn ? Color.accentColor : nil)
                 }
             }
 
-            if model.warmthBlocked && model.tintEnabled {
+            scheduleStatus
+
+            DisclosureGroup(isExpanded: $showSchedule) {
+                ScheduleSettingsView()
+            } label: {
+                Text("Sunset schedule").font(.caption)
+            }
+
+            if model.warmthBlocked {
                 Text("Paused while this preset locks brightness.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -231,10 +246,105 @@ private struct WarmthSection: View {
         .disabled(model.warmthBlocked)
     }
 
-    /// Icon colour follows the chosen temperature.
+    @ViewBuilder private var scheduleStatus: some View {
+        if model.schedule.enabled {
+            if let until = model.autoPausedUntil, until > Date() {
+                HStack {
+                    Text("Schedule paused until \(until.formatted(date: .omitted, time: .shortened))")
+                    Spacer()
+                    Button("Resume") { model.resumeAuto() }.controlSize(.small)
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            } else if let st = model.scheduleState {
+                Text(Self.describe(st, settings: model.schedule))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    static func describe(_ st: WarmthSchedule.State, settings: ScheduleSettings) -> String {
+        let at = st.nextChange.map { $0.formatted(date: .omitted, time: .shortened) } ?? "?"
+        switch st.phase {
+        case .day:     return "Daytime. Warming starts at \(at)"
+        case .warming: return "Warming to \(settings.nightKelvin)K by \(at)"
+        case .night:   return "Night at \(settings.nightKelvin)K until \(at)"
+        case .cooling: return "Cooling to \(settings.dayKelvin)K by \(at)"
+        }
+    }
+
+    /// Icon colour follows the current temperature.
     private var swatch: Color {
-        let m = GammaTint.multipliers(kelvin: Int(model.tintKelvin))
-        return model.tintEnabled ? Color(red: Double(m.r), green: Double(m.g), blue: Double(m.b)) : .secondary
+        guard let k = model.effectiveKelvin else { return .secondary }
+        let m = GammaTint.multipliers(kelvin: k)
+        return Color(red: Double(m.r), green: Double(m.g), blue: Double(m.b))
+    }
+}
+
+private struct ScheduleSettingsView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Follow sunset and sunrise", isOn: bind(\.enabled))
+
+            Group {
+                kelvinRow("Night", value: bind(\.nightKelvin), range: 1900...6000)
+                kelvinRow("Day", value: bind(\.dayKelvin), range: 4000...6500)
+
+                Stepper(value: bind(\.minutesBeforeSunset), in: 0...240, step: 15) {
+                    Text("Start warming \(minutes(model.schedule.minutesBeforeSunset)) before sunset")
+                }
+                Stepper(value: bind(\.minutesAfterSunrise), in: -120...240, step: 15) {
+                    Text(model.schedule.minutesAfterSunrise >= 0
+                         ? "Start cooling \(minutes(model.schedule.minutesAfterSunrise)) after sunrise"
+                         : "Start cooling \(minutes(-model.schedule.minutesAfterSunrise)) before sunrise")
+                }
+                Stepper(value: bind(\.transitionMinutes), in: 0...180, step: 10) {
+                    Text(model.schedule.transitionMinutes == 0
+                         ? "Change instantly"
+                         : "Fade over \(minutes(model.schedule.transitionMinutes))")
+                }
+
+                HStack {
+                    Image(systemName: "location")
+                    Text(model.schedule.locationName).lineLimit(1)
+                    Spacer()
+                    if model.locating { ProgressView().controlSize(.small) }
+                    Button("Use current location") { model.useCurrentLocation() }
+                        .controlSize(.small)
+                        .disabled(model.locating)
+                }
+                if let st = model.scheduleState ?? Optional(WarmthSchedule(settings: model.schedule).state()) {
+                    Text("Today: sunrise \(time(st.sunrise)) · sunset \(time(st.sunset))")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!model.schedule.enabled)
+        }
+        .font(.caption)
+        .padding(.top, 4)
+    }
+
+    private func kelvinRow(_ label: String, value: Binding<Int>, range: ClosedRange<Double>) -> some View {
+        HStack {
+            Text(label).frame(width: 36, alignment: .leading)
+            Slider(value: Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = Int($0) }),
+                   in: range, step: 100)
+            Text("\(value.wrappedValue)K").monospacedDigit().frame(width: 48, alignment: .trailing)
+        }
+    }
+
+    private func bind<T>(_ keyPath: WritableKeyPath<ScheduleSettings, T>) -> Binding<T> {
+        Binding(get: { model.schedule[keyPath: keyPath] },
+                set: { v in model.editSchedule { $0[keyPath: keyPath] = v } })
+    }
+
+    private func minutes(_ m: Int) -> String {
+        m >= 60 ? (m % 60 == 0 ? "\(m / 60) h" : "\(m / 60) h \(m % 60) min") : "\(m) min"
+    }
+
+    private func time(_ d: Date?) -> String {
+        d?.formatted(date: .omitted, time: .shortened) ?? "none"
     }
 }
 

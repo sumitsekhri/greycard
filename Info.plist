@@ -24,6 +24,10 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSLocationUsageDescription</key>
+    <string>Greycard uses your location once to work out local sunrise and sunset times for the warmth schedule.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Greycard uses your location once to work out local sunrise and sunset times for the warmth schedule.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>CFBundleURLTypes</key>

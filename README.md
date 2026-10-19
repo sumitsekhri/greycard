@@ -5,6 +5,10 @@ A Mac menu bar app to quickly change your display colour, warmth and brightness 
 Requires macOS 14 or later. It has four parts:
 
 - **Warmth slider.** Sets colour temperature in Kelvin, like f.lux. It runs from 1900K (Candle) to 10000K, and 6500K is neutral. There are quick stops for Candle, Halogen, Fluorescent and Daylight. Moving the slider turns warmth on.
+- **Sunset schedule.** Warmth can follow the sun, like f.lux:
+  - Settings: night temperature (default 3400K), day temperature (default 6500K, which is neutral), how long before sunset warming starts, how long after sunrise cooling starts, and how long each fade takes.
+  - Sunrise and sunset are calculated locally from a saved location (default Vancouver). **Use current location** asks for location access once.
+  - Moving the slider or applying a profile pauses the schedule until the next fade starts. **Resume** turns it back on immediately.
 - **Presets.** These are the same presets your display offers in System Settings › Displays (Photography, Internet & Web, and so on).
 - **Brightness-lock handling.** Some presets fix brightness, such as Photography; macOS then greys out the brightness slider. While such a preset is active:
   - True Tone is forced off and its toggle is disabled. If True Tone gets turned back on (from Control Centre, say), the app turns it off again within about 2 seconds.

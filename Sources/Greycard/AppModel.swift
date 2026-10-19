@@ -44,6 +44,13 @@ final class AppModel: ObservableObject {
     @Published var busy = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
+    // Automatic warmth (sunset → sunrise)
+    @Published var schedule = ScheduleSettings.load()
+    @Published var scheduleState: WarmthSchedule.State?
+    @Published var autoPausedUntil: Date?
+    @Published var locating = false
+    private let locationProvider = LocationProvider()
+
     private let store = ProfileStore()
     private var observers: [NSObjectProtocol] = []
     private var watchdog: Timer?
@@ -56,7 +63,8 @@ final class AppModel: ObservableObject {
     private init() {
         profiles = store.load()
         refresh()
-        if tintEnabled { applyTint() }
+        refreshSchedule()
+        if effectiveKelvin != nil { applyTint() }
         observe()
     }
 
@@ -188,7 +196,7 @@ final class AppModel: ObservableObject {
         activeProfileID = nil
         try? await Task.sleep(for: .milliseconds(400))
         refresh()
-        if tintEnabled { GammaTint.shared.invalidate(); applyTint() }
+        if effectiveKelvin != nil { GammaTint.shared.invalidate(); applyTint() }
     }
 
     func setTrueTone(_ on: Bool) async {
@@ -220,6 +228,7 @@ final class AppModel: ObservableObject {
     }
 
     func setTintEnabled(_ on: Bool) {
+        pauseAutoForManualChange()
         tintEnabled = on
         UserDefaults.standard.set(on, forKey: "tintEnabled")
         activeProfileID = nil
@@ -228,6 +237,7 @@ final class AppModel: ObservableObject {
 
     /// Moving the slider (or a stop button) turns warmth on, like f.lux.
     func setTintKelvin(_ k: Double) {
+        pauseAutoForManualChange()
         tintKelvin = k
         UserDefaults.standard.set(k, forKey: "tintKelvin")
         activeProfileID = nil
@@ -238,10 +248,88 @@ final class AppModel: ObservableObject {
         reportTint(applyTint())
     }
 
+    /// What the screen should be right now: nil = neutral (no tint).
+    var effectiveKelvin: Int? {
+        if warmthBlocked { return nil }
+        if autoActive, let st = scheduleState { return st.kelvin >= 6500 ? nil : st.kelvin }
+        return tintEnabled ? Int(tintKelvin) : nil
+    }
+
+    /// Whether warmth is on, from the schedule when it's driving, otherwise the manual toggle.
+    var warmthOn: Bool {
+        autoActive ? (scheduleState?.kelvin ?? 6500) < 6500 : tintEnabled
+    }
+
+    /// Value the slider shows: the schedule's when it's driving, otherwise the manual one.
+    var displayKelvin: Double {
+        if autoActive, let st = scheduleState { return Double(st.kelvin) }
+        return tintKelvin
+    }
+
     @discardableResult
     private func applyTint() -> Bool {
-        let k = (tintEnabled && !warmthBlocked) ? Int(tintKelvin) : nil
-        return GammaTint.shared.apply(kelvin: k, to: displays.map(\.id))
+        GammaTint.shared.apply(kelvin: effectiveKelvin, to: displays.map(\.id))
+    }
+
+    // MARK: Automatic warmth schedule
+
+    var autoActive: Bool {
+        guard schedule.enabled else { return false }
+        if let until = autoPausedUntil, until > Date() { return false }
+        return true
+    }
+
+    func editSchedule(_ change: (inout ScheduleSettings) -> Void) {
+        let wasEnabled = schedule.enabled
+        change(&schedule)
+        schedule.dayKelvin = min(max(schedule.dayKelvin, 1900), 6500)
+        schedule.nightKelvin = min(max(schedule.nightKelvin, 1900), schedule.dayKelvin)
+        schedule.save()
+        if schedule.enabled != wasEnabled { autoPausedUntil = nil }
+        refreshSchedule()
+        reportTint(applyTint())
+    }
+
+    func resumeAuto() {
+        autoPausedUntil = nil
+        refreshSchedule()
+        reportTint(applyTint())
+    }
+
+    func useCurrentLocation() {
+        locating = true
+        locationProvider.requestOnce { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                self.locating = false
+                switch result {
+                case .success(let loc):
+                    self.editSchedule {
+                        $0.latitude = loc.lat
+                        $0.longitude = loc.lon
+                        $0.locationName = loc.name
+                    }
+                case .failure(let error):
+                    self.notice = Notice(text: error.localizedDescription, isWarning: true)
+                }
+            }
+        }
+    }
+
+    private func refreshSchedule() {
+        if let until = autoPausedUntil, until <= Date() { autoPausedUntil = nil }
+        scheduleState = schedule.enabled ? WarmthSchedule(settings: schedule).state() : nil
+    }
+
+    /// Touching the warmth controls while the schedule runs pauses it until the next ramp starts.
+    private func pauseAutoForManualChange() {
+        guard schedule.enabled, autoActive else { return }
+        if let st = scheduleState {
+            // Start the manual value from what the schedule was showing, so the slider doesn't jump.
+            tintKelvin = Double(st.kelvin)
+            tintEnabled = st.kelvin < 6500
+        }
+        autoPausedUntil = scheduleState?.nextRampStart ?? Date().addingTimeInterval(3600)
     }
 
     private func reportTint(_ ok: Bool) {
@@ -346,6 +434,10 @@ final class AppModel: ObservableObject {
         if let k = p.tintKelvin { tintKelvin = Double(k) }
         UserDefaults.standard.set(tintEnabled, forKey: "tintEnabled")
         UserDefaults.standard.set(tintKelvin, forKey: "tintKelvin")
+        if schedule.enabled {
+            refreshSchedule()
+            autoPausedUntil = scheduleState?.nextRampStart ?? Date().addingTimeInterval(3600)
+        }
         GammaTint.shared.invalidate()
         if !applyTint() { warnings.append("The display ignored the custom warmth in this preset.") }
 
@@ -417,7 +509,7 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, let self else { return }
             self.refresh()
-            if self.tintEnabled { GammaTint.shared.invalidate(); self.applyTint() }
+            if self.effectiveKelvin != nil { GammaTint.shared.invalidate(); self.applyTint() }
         }
     }
 
@@ -427,9 +519,20 @@ final class AppModel: ObservableObject {
         refreshPresets()
         evaluateLock()
         readBrightnessClients()
-        if tintEnabled && (previousPreset != activePresetID || GammaTint.shared.needsReapply()) {
+        refreshSchedule()
+        if effectiveKelvin != nil && (previousPreset != activePresetID || GammaTint.shared.needsReapply()) {
             GammaTint.shared.invalidate()
             applyTint()
+        } else {
+            // Follow the schedule's ramp; skip tiny steps to avoid needless gamma writes.
+            let target = effectiveKelvin, current = GammaTint.shared.kelvin
+            let changed: Bool
+            switch (target, current) {
+            case (nil, nil): changed = false
+            case let (a?, b?): changed = abs(a - b) >= 10
+            default: changed = true
+            }
+            if changed { applyTint() }
         }
     }
 }
