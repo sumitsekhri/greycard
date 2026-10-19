@@ -2,7 +2,7 @@
 
 A Mac menu bar app to quickly change your display colour, warmth and brightness configuration. Its main job is switching an Apple display into the **Photography** reference preset with True Tone locked off, so colours are accurate for photo and video editing.
 
-Requires macOS 14 or later. It has four parts:
+Requires macOS 14 or later. It has five parts:
 
 - **Warmth slider.** Sets colour temperature in Kelvin, like f.lux. It runs from 1900K (Candle) to 10000K, and 6500K is neutral. There are quick stops for Candle, Halogen, Fluorescent and Daylight. Moving the slider turns warmth on.
 - **Sunset schedule.** Warmth can follow the sun, like f.lux:
